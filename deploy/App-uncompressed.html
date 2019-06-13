@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>My Portfolio Item Tree</title>
+
+    <script type="text/javascript" src="/apps/2.1/sdk-debug.js"></script>
+
+    <script type="text/javascript">
+        Rally.onReady(function () {
+                (function () {
+    var Ext = window.Ext4 || window.Ext;
+
+var gApp = null;
+
+Ext.define('Rally.apps.PortfolioItemCopy.app', {
+    extend: 'Rally.app.TimeboxScopedApp',
+    settingsScope: 'project',
+    componentCls: 'app',
+    config: {
+        defaultSettings: {
+            keepTypesAligned: true,
+            hideArchived: true,
+            showFilter: true,
+            allowMultiSelect: false,
+            useColour: false
+        }
+    },
+    getSettingsFields: function() {
+        var returned = [
+            {
+                name: 'allowMultiSelect',
+                xtype: 'rallycheckboxfield',
+                fieldLabel: 'Enable multiple start items (Note: Page Reload required if you change value)',
+                labelAlign: 'top'
+            },
+            {
+                xtype: 'rallycheckboxfield',
+                fieldLabel: 'Show Advanced filter',
+                name: 'showFilter',
+                labelAlign: 'top'
+            }
+        ];
+        return returned;
+    },
+    itemId: 'rallyApp',
+        STORE_FETCH_FIELD_LIST:
+            [
+                'Name',
+                'FormattedID',
+                'Parent',
+                'DragAndDropRank',
+                'Children',
+                'ObjectID',
+                'Project',
+                'DisplayColor',
+                'Owner',
+                'Blocked',
+                'BlockedReason',
+                'Ready',
+                'Tags',
+                'Workspace',
+                'RevisionHistory',
+                'CreationDate',
+                'PercentDoneByStoryCount',
+                'PercentDoneByStoryPlanEstimate',
+                'PredecessorsAndSuccessors',
+                'State',
+                'PreliminaryEstimate',
+                'Description',
+                'Notes',
+                'Predecessors',
+                'Successors',
+                'OrderIndex',   //Used to get the State field order index
+                'PortfolioItemType',
+                'Ordinal',
+                'Release',
+                'Iteration',
+                'Milestones',
+                //Customer specific after here. Delete as appropriate
+                'c_ProjectIDOBN',
+                'c_QRWP',
+                'c_ProgressUpdate',
+                'c_RAIDSeverityCriticality',
+                'c_RISKProbabilityLevel',
+                'c_RAIDRequestStatus'   
+            ],
+
+    items: [
+        {  
+            xtype: 'container',
+            itemId: 'filterBox'
+        },{
+            xtype: 'container',
+            itemId: 'selectionBox',
+            listeners: {
+                afterrender:  function() {  gApp = this.up('#rallyApp'); gApp._onElementValid(this);},
+            }
+
+        }
+    ],
+
+    timer: null,
+    
+    _resetTimer: function(callFunc) {
+        if ( gApp.timer) { clearTimeout(gApp.timer);}
+        gApp.timer = setTimeout(callFunc, 2000);    //Debounce user selections to the tune of two seconds
+    },
+
+    _nodeTree: null,
+
+    //Continuation point after selectors ready/changed
+    _enterMainApp: function() {
+
+        //Get all the nodes and the "Unknown" parent virtual nodes
+        var nodetree = gApp._createTree(gApp._nodes);
+        gApp._nodeTree = nodetree;      //Save for later
+        gApp._refreshTree();
+    },
+    
+    _refreshTree: function(){
+        debugger;
+    },
+
+    //Entry point after creation of render box
+    _onElementValid: function(rs) {
+        gApp.timeboxScope = gApp.getContext().getTimeboxScope(); 
+        //Add any useful selectors into this container ( which is inserted before the rootSurface )
+        //Choose a point when all are 'ready' to jump off into the rest of the app
+        var hdrBoxConfig = {
+            xtype: 'container',
+            itemId: 'headerBox',
+            layout: 'hbox',
+            items: [
+                
+                {
+                    xtype:  'rallyportfolioitemtypecombobox',
+                    itemId: 'piType',
+                    fieldLabel: 'Choose Portfolio Type :',
+                    labelWidth: 100,
+                    margin: '5 0 5 20',
+                    defaultSelectionPosition: 'first',
+//                    storeConfig: {
+//                        sorters: {
+//                            property: 'Ordinal',
+//                            direction: 'ASC'
+//                        }
+//                    },
+                    listeners: {
+                        select: function() { gApp._kickOff();},    //Jump off here to add portfolio size selector
+                    }
+                },
+            ]
+        };
+        
+        var hdrBox = this.insert (0,hdrBoxConfig);
+        
+    },
+
+    _nodes: [],
+
+    onSettingsUpdate: function() {
+        if ( gApp._nodes) gApp._nodes = [];
+        gApp._getArtifacts( gApp.down('#itemSelector').valueModels);
+    },
+
+    onTimeboxScopeChange: function(newTimebox) {
+        this.callParent(arguments);
+        gApp.timeboxScope = newTimebox;
+        if ( gApp._nodes) gApp._nodes = [];
+        gApp._getArtifacts( [gApp.down('#itemSelector').getRecord()]);
+    },
+
+    _onFilterChange: function(inlineFilterButton){
+        gApp.advFilters = inlineFilterButton.getTypesAndFilters().filters;
+        inlineFilterButton._previousTypesAndFilters = inlineFilterButton.getTypesAndFilters();
+        if ( gApp._nodes.length) {
+            gApp._nodes = [];
+            gApp._getArtifacts( [gApp.down('#itemSelector').getRecord()]);
+        }
+    },
+
+    _onFilterReady: function(inlineFilterPanel) {
+        gApp.down('#filterBox').add(inlineFilterPanel);
+    },
+
+    _kickOff: function() {
+        var ptype = gApp.down('#piType');
+        var hdrBox = gApp.down('#headerBox');
+        gApp._typeStore = ptype.store;
+        var selector = gApp.down('#itemSelector');
+        if ( selector) {
+            selector.destroy();
+        }
+        var is = hdrBox.insert(2,{
+            xtype: 'rallyartifactsearchcombobox',
+            fieldLabel: 'Choose Start Item :',
+            itemId: 'itemSelector',
+            multiSelect: gApp.getSetting('allowMultiSelect'),
+            labelWidth: 100,
+            queryMode: 'remote',
+            allowNoEntry: false,
+            pageSize: 200,
+            width: 600,
+            margin: '10 0 5 20',
+            stateful: true,
+            stateId: this.getContext().getScopedStateId('itemSelector'),
+            storeConfig: {
+                models: [ 'portfolioitem/' + ptype.rawValue ],
+                fetch: gApp.STORE_FETCH_FIELD_LIST,
+                context: gApp.getContext().getDataContext(),
+                pageSize: 200,
+                autoLoad: true
+            },
+            listeners: {
+                // select: function(selector,records) {
+                //     this.startAgain(selector,this.valueModels);
+                // },
+                change: function(selector,records) {
+                    if (records && (records.length > 0)) {
+                        gApp._resetTimer(this.startAgain);
+                    }
+                }
+            },
+            startAgain: function () {
+                var records = gApp.down('#itemSelector').valueModels;
+                if ( gApp._nodes) gApp._nodes = [];
+                if (records && (records.length > 1)) {
+                        gApp._nodes.push({'Name': 'Combined View',
+                        'record': {
+                            'data': {
+                                '_ref': 'root',
+                                'Name': ''
+                            }
+                        },
+                        'local':true
+                    });
+                }
+                gApp._getArtifacts(records);
+            }
+        });   
+
+//        Ext.util.Observable.capture( is, function(event) { console.log('event', event, arguments);});
+        if(gApp.getSetting('showFilter') && !gApp.down('#inlineFilter')){
+            hdrBox.add({
+                xtype: 'rallyinlinefiltercontrol',
+                name: 'inlineFilter',
+                itemId: 'inlineFilter',
+                margin: '10 0 5 20',                           
+                context: this.getContext(),
+                height:26,
+                inlineFilterButtonConfig: {
+                    stateful: true,
+                    stateId: this.getContext().getScopedStateId('inline-filter'),
+                    context: this.getContext(),
+//                    modelNames: ['PortfolioItem/' + ptype.rawValue], //NOOOO!
+                    modelNames: gApp._getModelFromOrd(0), //We actually want to filter the features... YESSSS!
+                    filterChildren: false,
+                    inlineFilterPanelConfig: {
+                        quickFilterPanelConfig: {
+                            defaultFields: ['ArtifactSearch', 'Owner']
+                        }
+                    },
+                    listeners: {
+                        inlinefilterchange: this._onFilterChange,
+                        inlinefilterready: this._onFilterReady,
+                        scope: this
+                    } 
+                }
+            });
+        }
+
+        if (!gApp.down('#infoButton')){
+                hdrBox.add( {
+                xtype: 'rallybutton',
+                itemId: 'infoButton',
+                margin: '10 0 5 20',
+                align: 'right',
+                text: 'Page Info',
+                handler: function() {
+                    Ext.create('Rally.ui.dialog.Dialog', {
+                        autoShow: true,
+                        draggable: true,
+                        closable: true,
+                        width: 500,
+                        autoScroll: true,
+                        maxHeight: 600,
+                        title: 'Information about this app',
+                        items: {
+                            xtype: 'component',
+                            html: 
+                                '<p class="boldText">Hierarchical Tree View</p>' +
+                                '<p>This app will find all the children of a particular Portfolio artefact. You can choose the type of artefact,' +
+                                ' then the top level artefact itself.</p>' +
+                                '<p>The colours of the circles indicate the state of progress from red (those that are not started), through to' +
+                                ' blue (in their final stages). Click on the "Colour Codes" button to see the colour to state mapping for each' +
+                                ' portfolio item type.</p>' +
+                                '<p class="boldText">Choosing collections</p>' +
+                                '<p>The app settings contains an option to allow you to multi-select the top level artefacts. This allows you to' +
+                                ' choose a number of portfolio items of interest and then filter for the features</p>' +
+                                '<p class="boldText">Visualising Dependencies</p>' +
+                                '<p>The edge of the circle will be red if there are any dependencies (predecessors or successors) and the colour ' +
+                                'of the associated text will indicate those with predecessors (red text) and those with successors (green text). ' +
+                                'Those with both will appear as having predecessors</p>' +
+                                '<p>If the text is blinking, it means that the relevant dependency is not being shown in this data set. </p>' +
+                                '<p class="boldText">Exploring the data</p><p>You can investigate dependencies by using &lt;shift&gt;-Click ' +
+                                'on the circle. This will call up an overlay with the relevant dependencies. Clicking on the FormattedID on any' +
+                                ' artefact in the overlay will take you to it in either the EDP or QDP page (whichever you have enabled for your' +
+                                ' session )</p>' +
+                                '<p>If you click on the circle without using shift, then a data panel will appear containing more information about that artefact</p>' +
+                                '<p class="boldText">Filtering</p>' +
+                                '<p>There are app settings to enable the extra filtering capabilities on the main page, so that you can choose which lowest-level portfolio items to see' +
+                                ' e.g. filter on Owner, Investment Type, etc. </p><p>To filter by release (e.g. to find all those features scheduled into a Program Increment)' +
+                                ' you will need to edit the Page settings (not the App Settings) to add a Release or Milestone filter</p>' +
+                                '<p>Source code available here: <br/><a href=https://github.com/nikantonelli/PortfolioItem-Tree-With-Dependencies> Github Repo</a></p>',
+                            padding: 10
+                        }
+                    });
+                }
+            } );
+        }
+    },
+
+
+    _getArtifacts: function(data) {
+        //On re-entry send an event to redraw
+        gApp._nodes = gApp._nodes.concat( gApp._createNodes(data));    //Add what we started with to the node list
+
+        //Starting with highest selected by the combobox, go down
+
+        _.each(data, function(record) {
+            //Limit this to portfolio items down to just above feature level and not beyond.
+            //The lowest level portfolio item type has 'UserStories' not 'Children'
+            if (record.hasField('Children')&& (!record.data._ref.includes('hierarchicalrequirement'))){ 
+                var collectionConfig = {
+                    sorters: [
+                        {
+                            property: 'DragAndDropRank',
+                            direction: 'ASC'
+                        }
+                    ],
+                    fetch: gApp.STORE_FETCH_FIELD_LIST,
+                    callback: function(records, operation, success) {
+                        //Start the recursive trawl down through the levels
+                        if (success && records && records.length)  gApp._getArtifacts(records);
+                    },
+                    filters: []
+                };
+                if (gApp.getSetting('hideArchived')) {
+                    collectionConfig.filters.push({
+                        property: 'Archived',
+                        operator: '=',
+                        value: false
+                    });
+                }
+
+                if(gApp.getSetting('showFilter') && gApp.advFilters && gApp.advFilters.length > 0){
+                    Ext.Array.each(gApp.advFilters,function(filter){
+                        collectionConfig.filters.push(filter);
+                    });
+                }
+
+                record.getCollection( 'Children').load( collectionConfig );
+            }
+            else {
+                //We are features or UserStories when we come here
+                var collectionConfig = {
+                    sorters: [{
+                        property: 'DragAndDropRank',
+                        direction: 'ASC'  
+                    }],
+                    fetch: gApp.STORE_FETCH_FIELD_LIST,
+                    callback: function(records, operation, s) {
+                        if (s) {
+                            if (records && records.length) {
+
+                                //At this point, we need to decide whether we are adding nodes to the main tree
+                                if (gApp.getSetting('includeStories')){
+                                    gApp._nodes = gApp._nodes.concat( gApp._createNodes(records));
+                                    gApp.fireEvent('refreshTree');
+                                } 
+                            }
+                        }
+                    }
+                };
+                //If we are lowest level PI, then we need to fetch User Stories
+                if (record.hasField('UserStories')) {  
+                    collectionConfig.fetch.push(gApp._getModelFromOrd(0).split("/").pop()); //Add the lowest level field on User Stories
+                    record.getCollection( 'UserStories').load( collectionConfig );
+                } 
+                // //If we are userstories/defects, then we need to fetch defects, tasks and test cases
+                else {
+                    if (record.hasField('Tasks') ){
+                        record.getCollection( 'Tasks').load( collectionConfig );                    
+                    }
+
+                    if (record.hasField('Defects')) {
+                        //Now create a new config for Defects 
+                        var defectConfig = {
+                            sorters: [{
+                                property: 'DragAndDropRank',
+                                direction: 'ASC'  
+                            }],
+                            fetch: gApp.STORE_FETCH_FIELD_LIST,
+                            callback: function(records, operation, s) {
+                                if (s) {
+                                    if (records && records.length) {
+                                        gApp._nodes = gApp._nodes.concat( gApp._createNodes(records));
+                                        gApp.fireEvent('refreshTree');
+                                    }
+                                }
+                            }
+                        };
+                        record.getCollection( 'Defects').load( defectConfig );
+                    }
+                    if (record.hasField('TestCases')) {
+                        //Now create a new config for Defects 
+                        var testCaseConfig = {
+                            sorters: [{
+                                property: 'DragAndDropRank',
+                                direction: 'ASC'  
+                            }],
+                            fetch: gApp.STORE_FETCH_FIELD_LIST,
+                            callback: function(records, operation, s) {
+                                if (s) {
+                                    if (records && records.length) {
+                                        gApp._nodes = gApp._nodes.concat( gApp._createNodes(records));
+                                        gApp.fireEvent('refreshTree');
+                                    }
+                                }
+                            }
+                        };
+                        record.getCollection( 'TestCases').load( testCaseConfig );
+                    }
+                }
+
+            }
+        });
+    },
+
+    _createNodes: function(data) {
+        //These need to be sorted into a hierarchy based on what we have. We are going to add 'other' nodes later
+        var nodes = [];
+        //Push them into an array we can reconfigure
+        _.each(data, function(record) {
+            var localNode = (gApp.getContext().getProjectRef() === record.get('Project')._ref);
+            nodes.push({'Name': record.get('FormattedID'), 'record': record, 'local': localNode, 'dependencies': []});
+        });
+        return nodes;
+    },
+
+    _findNode: function(nodes, recordData) {
+        var returnNode = null;
+            _.each(nodes, function(node) {
+                if (node.record && (node.record.data._ref === recordData._ref)){
+                     returnNode = node;
+                }
+            });
+        return returnNode;
+
+    },
+    _findParentType: function(record) {
+        //The only source of truth for the hierachy of types is the typeStore using 'Ordinal'
+        var ord = null;
+        for ( var i = 0;  i < gApp._typeStore.totalCount; i++ )
+        {
+            if (record.data._type === gApp._typeStore.data.items[i].get('TypePath').toLowerCase()) {
+                ord = gApp._typeStore.data.items[i].get('Ordinal');
+                break;
+            }
+        }
+        ord += 1;   //We want the next one up, if beyond the list, set type to root
+        //If we fail this, then this code is wrong!
+        if ( i >= gApp._typeStore.totalCount) {
+            return null;
+        }
+        var typeRecord =  _.find(  gApp._typeStore.data.items, function(type) { return type.get('Ordinal') === ord;});
+        return (typeRecord && typeRecord.get('TypePath').toLowerCase());
+    },
+    _findNodeById: function(nodes, id) {
+        return _.find(nodes, function(node) {
+            return node.record.data._ref === id;
+        });
+    },
+    _findParentNode: function(nodes, child){
+        if (child.record.data._ref === 'root') return null;
+        var parent = child.record.data.Parent;
+        var pParent = null;
+        if (parent ){
+            //Check if parent already in the node list. If so, make this one a child of that one
+            //Will return a parent, or null if not found
+            pParent = gApp._findNode(nodes, parent);
+        }
+        else {
+            //Here, there is no parent set, so attach to the 'null' parent.
+            var pt = gApp._findParentType(child.record);
+            //If we are at the top, we will allow d3 to make a root node by returning null
+            //If we have a parent type, we will try to return the null parent for this type.
+            if (pt) {
+                var parentName = '/' + pt + '/null';
+                pParent = gApp._findNodeById(nodes, parentName);
+            }
+        }
+        //If the record is a type at the top level, then we must return something to indicate 'root'
+        return pParent?pParent: gApp._findNodeById(nodes, 'root');
+    },
+        //Routines to manipulate the types
+
+    _getSelectedOrdinal: function() {
+        return gApp.down('#piType').lastSelection[0].get('Ordinal');
+    },
+
+     _getTypeList: function(highestOrdinal) {
+        var piModels = [];
+        _.each(gApp._typeStore.data.items, function(type) {
+            //Only push types below that selected
+            if (type.data.Ordinal <= (highestOrdinal ? highestOrdinal: 0) )
+                piModels.push({ 'type': type.data.TypePath.toLowerCase(), 'Name': type.data.Name, 'ref': type.data._ref, 'Ordinal': type.data.Ordinal});
+        });
+        return piModels;
+    },
+
+    _highestOrdinal: function() {
+        return _.max(gApp._typeStore.data.items, function(type) { return type.get('Ordinal'); }).get('Ordinal');
+    },
+    _getModelFromOrd: function(number){
+        var model = null;
+        _.each(gApp._typeStore.data.items, function(type) { if (number == type.get('Ordinal')) { model = type; } });
+        return model && model.get('TypePath');
+    },
+
+    _getOrdFromModel: function(modelName){
+        var model = null;
+        _.each(gApp._typeStore.data.items, function(type) {
+            if (modelName == type.get('TypePath').toLowerCase()) {
+                model = type.get('Ordinal');
+            }
+        });
+        return model;
+    },
+
+    _createTree: function (nodes) {
+        //Try to use d3.stratify to create nodet
+        var nodetree = d3.stratify()
+                    .id( function(d) {
+                        var retval = (d.record && d.record.data._ref) || null; //No record is an error in the code, try to barf somewhere if that is the case
+                        return retval;
+                    })
+                    .parentId( function(d) {
+                        var pParent = gApp._findParentNode(nodes, d);
+                        return (pParent && pParent.record && pParent.record.data._ref); })
+                    (nodes);
+        return nodetree;
+    },
+
+    refetchTree: function() {
+        gApp._enterMainApp();
+    },
+
+    _getNodeId: function(d){
+        if (d.data.record.data._ref === 'root') { return Ext.id();}
+        return d.data.record? d.data.record.get('FormattedID'): Ext.id();
+    },
+
+    launch: function() {
+
+        this.on('refetchTree', this.refetchTree);
+    },
+
+    initComponent: function() {
+        this.callParent(arguments);
+        this.addEvents('refetchTree');
+    },
+
+});
+}());
+
+            Rally.launchApp('Rally.apps.PortfolioItemCopy.app', {
+                name:"My Portfolio Item Tree",
+                parentRepos:"",
+                version:"0.1.1"
+            });
+
+        });
+    </script>
+
+
+
+    <style type="text/css">
+        .node text {
+  font: 14px sans-serif;
+}
+.info--box text {
+  font-size: 14px;
+  font-family: "ProximaNovaSemiBold,Helvetica,Arial";
+}
+.node--internal text {
+  text-shadow: 0 1px 0 #ffffff, 0 -1px 0 #ffffff, 1px 0 0 #ffffff, -1px 0 0 #ffffff;
+}
+.local--link {
+  fill: none;
+  stroke: #111;
+  stroke-opacity: 0.4;
+  stroke-width: 1.5px;
+}
+.remote--link {
+  fill: none;
+  stroke: #ddd;
+  stroke-opacity: 0.4;
+  stroke-width: 1.5px;
+}
+.invisible--link {
+  fill: none;
+  stroke: #ddd;
+  stroke-opacity: 0.0;
+  stroke-width: 1.5px;
+}
+.predecessor--link {
+  fill: dashed;
+  stroke: lightblue;
+  stroke-opacity: 0.5;
+  stroke-width: 3px;
+}
+.error--node {
+  fill: #000000;
+}
+.data--errors {
+  stroke: #f00;
+  stroke-width: 3px;
+}
+.no--errors {
+  stroke: #111;
+  stroke-width: 2px;
+}
+.no--errors--not--started {
+  fill: #00ffff;
+  stroke: #111;
+  stroke-width: 2px;
+}
+.no--errors--in--progress {
+  fill: #0f0;
+  stroke: #00f;
+  stroke-width: 2px;
+}
+.dotOutline {
+  stroke: #000;
+  stroke-width: 2px;
+}
+.gotDependencies {
+  stroke: #f00;
+  stroke-width: 2px;
+  fill: #ff0000;
+}
+.gotSuccText {
+  fill: #888800;
+}
+.gotPredText {
+  fill: #ff0000;
+}
+.boldText {
+  font-weight: bold;
+}
+.RAID-blue {
+  border-radius: 10px;
+  border: 2px solid black;
+  height: 20px;
+  width: 20px;
+  background-color: #145FAC;
+}
+.RAID-red {
+  border-radius: 10px;
+  border: 2px solid black;
+  height: 20px;
+  width: 20px;
+  background-color: #ff005c;
+}
+.RAID-amber {
+  border-radius: 10px;
+  border: 2px solid black;
+  background-color: #f3ca5e;
+  height: 20px;
+  width: 20px;
+}
+.RAID-green {
+  border-radius: 10px;
+  border: 2px solid black;
+  height: 20px;
+  width: 20px;
+  background: #b3ee01;
+}
+.q0-3 {
+  fill: #fc8d59;
+}
+.q1-3 {
+  fill: #ffffbf;
+}
+.q2-3 {
+  fill: #91bfdb;
+}
+.q0-4 {
+  fill: #d7191c;
+}
+.q1-4 {
+  fill: #fdae61;
+}
+.q2-4 {
+  fill: #abd9e9;
+}
+.q3-4 {
+  fill: #2c7bb6;
+}
+.q0-5 {
+  fill: #d7191c;
+}
+.q1-5 {
+  fill: #fdae61;
+}
+.q2-5 {
+  fill: #ffffbf;
+}
+.q3-5 {
+  fill: #abd9e9;
+}
+.q4-5 {
+  fill: #2c7bb6;
+}
+.q0-6 {
+  fill: #d73027;
+}
+.q1-6 {
+  fill: #fc8d59;
+}
+.q2-6 {
+  fill: #fee090;
+}
+.q3-6 {
+  fill: #e0f3f8;
+}
+.q4-6 {
+  fill: #91bfdb;
+}
+.q5-6 {
+  fill: #4575b4;
+}
+.q0-7 {
+  fill: #d73027;
+}
+.q1-7 {
+  fill: #fc8d59;
+}
+.q2-7 {
+  fill: #fee090;
+}
+.q3-7 {
+  fill: #ffffbf;
+}
+.q4-7 {
+  fill: #e0f3f8;
+}
+.q5-7 {
+  fill: #91bfdb;
+}
+.q6-7 {
+  fill: #4575b4;
+}
+.q0-8 {
+  fill: #d73027;
+}
+.q1-8 {
+  fill: #f46d43;
+}
+.q2-8 {
+  fill: #fdae61;
+}
+.q3-8 {
+  fill: #fee090;
+}
+.q4-8 {
+  fill: #e0f3f8;
+}
+.q5-8 {
+  fill: #abd9e9;
+}
+.q6-8 {
+  fill: #74add1;
+}
+.q7-8 {
+  fill: #4575b4;
+}
+.q0-9 {
+  fill: #d73027;
+}
+.q1-9 {
+  fill: #f46d43;
+}
+.q2-9 {
+  fill: #fdae61;
+}
+.q3-9 {
+  fill: #fee090;
+}
+.q4-9 {
+  fill: #ffffbf;
+}
+.q5-9 {
+  fill: #e0f3f8;
+}
+.q6-9 {
+  fill: #abd9e9;
+}
+.q7-9 {
+  fill: #74add1;
+}
+.q8-9 {
+  fill: #4575b4;
+}
+@keyframes textBlink {
+  50% {
+    opacity: 0.5;
+  }
+}
+@-webkit-keyframes textBlink {
+  50% {
+    opacity: 0.5;
+  }
+}
+.textBlink {
+  animation: textBlink 1s step-start 0s infinite;
+  -webkit-animation: textBlink 1s step-start 0s infinite;
+}
+.RAID-missing-severity {
+  border-radius: 10px;
+  border: 2px solid red;
+  height: 20px;
+  width: 20px;
+  background-color: white;
+  background: linear-gradient(#ffffff 50%, #ff0000 50%);
+  background-size: 20% 100%;
+  background-repeat: repeat-x;
+}
+.RAID-missing-probability {
+  border-radius: 10px;
+  border: 2px solid red;
+  height: 20px;
+  width: 20px;
+  background-color: white;
+  background: linear-gradient(#ff0000 50%, #ffffff 50%);
+  background-size: 20% 100%;
+  background-repeat: repeat-x;
+}
+.RAID-missing-severity-probability {
+  border-radius: 10px;
+  border: 2px solid red;
+  height: 20px;
+  width: 20px;
+  background-color: white;
+}
+
+    </style>
+</head>
+<body>
+</body>
+</html>

@@ -1,0 +1,5 @@
+/.vscode
+/test
+*.old
+*.orig
+*.bak
