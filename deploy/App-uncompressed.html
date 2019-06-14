@@ -58,7 +58,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
             custom: []
         },
 
-        'portfolioitemLevel1': {
+        'portfolioitemLevel0': {
             default: ['State', 'PortfolioItemType', 'UserStories'],
             extended: [],
             custom: []
@@ -164,7 +164,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         if (modelType.toLowerCase().startsWith('portfolioitem/')){
             var ordinal = gApp.down('#piType').store.findRecord('TypePath', modelType).get('Ordinal');
             if (ordinal === 0){
-                fieldListName = 'portfolioitemLevel1';
+                fieldListName = 'portfolioitemLevel0';
             }
             else {
                 fieldListName = 'portfoliotemLevelUpper';
@@ -217,7 +217,9 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
 //                        }
 //                    },
                     listeners: {
-                        select: function() { gApp._kickOff();},    //Jump off here to add portfolio size selector
+                        select: function() { 
+                            gApp.sourceTypeStore = this.store;
+                            gApp._kickOff();},    //Jump off here to add portfolio size selector
                     }
                 },
             ]
@@ -371,12 +373,11 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
             failure: function(e) {
                 deferred.reject(e);
             }
-        })
+        });
         return deferred.promise;
     },
 
     _getTargetWorkspace: function() {
-        debugger;
         return gApp.down('#penguin').projectRecord.get('Workspace');
     },
 
@@ -392,27 +393,23 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
     },
 
     _scanForTargetModels: function () {
-        // ##TODO, translate to target
-        gApp.targetModelList = gApp.sourceModelList;
 
+        //We can fetch all the models in the target portfolio heirarchy and then add the non-portfolio ones from the source list
+        gApp.targetModelList = _.pluck(gApp.targetTypeStore.getRecords(), function(piType) {
+            return piType.get('TypePath');
+        });
+        gApp.targetModelList = gApp.targetModelList.concat( _.filter(gApp.sourceModelList, function(model) {
+            return !(model.toLowerCase().startsWith('portfolioitem'));
+        }));
         return gApp.targetModelList;
     },
 
     _checkModelEquality: function(){
         var deferred = Ext.create('Deft.Deferred');
 
-        var promises = [];
-        
-        Deft.Promise.all(promises).then({
-            success: function() {
-                //Give the user a modal that shows issues and  asks if you want to continue. If not, reject the deferred
-                deferred.resolve();
-            },
-            failure: function(e) {
-                deferred.reject(e);
-            }
-        })
-
+        // We have all the models for target and source. Now do a check whether the models are compatible
+        //If not, pop-up a modal to ask the user if they want to do the most possible or cancel
+        // ##TODO
         return deferred.promise;
     },
 
@@ -498,10 +495,50 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         return deferred.promise;
     },
 
+    _loadTargetPortfolioTypes: function() {
+        var deferred = Ext.create('Deft.Deferred');
+        gApp.setLoading('Fetching Target Portfolio Types');
+        gApp.targetTypeStore = Ext.create('Rally.data.wsapi.Store', {
+            context: {
+                workspace: gApp._getTargetWorkspace()._ref,
+                project: null,
+                projectScopeUp: false,
+                projectScopeDown: false
+            },
+            autoLoad: true,
+            remoteFilter: true,
+            model: Ext.identityFn('TypeDefinition'),
+            sorters: {
+                property: 'Ordinal',
+                direction: 'Desc'
+            },
+            filters: [
+                {
+                    property: 'Parent.Name',
+                    operator: '=',
+                    value: 'Portfolio Item'
+                },
+                {
+                    property: 'Creatable',
+                    operator: '=',
+                    value: 'true'
+                }
+            ],
+            listeners : {
+                load: function() {
+                    deferred.resolve();
+                }
+            }
+        });
+
+        return deferred.promise;
+    },
+
     _mainAction: function(){
 
         var calls = [
             gApp._getSourceModels,  //Get list of models we found in the tree
+            gApp._loadTargetPortfolioTypes,
             gApp._getTargetModels,  //Then translate this into what might be on the destination (i.e. portfolio item types)
             gApp._checkModelEquality,   //Check whether the fields exist on both ends for all the models
         ];
@@ -621,7 +658,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         return str;
     },
 
-    _updateHierarchyStatus(type, count) {
+    _updateHierarchyStatus: function(type, count) {
 
         if ( ! gApp.hierarchyStatusMessage.hasOwnProperty(type)){
             gApp.hierarchyStatusMessage[type] = 0;
