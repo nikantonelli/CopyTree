@@ -9,11 +9,9 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
     componentCls: 'app',
     config: {
         defaultSettings: {
-            keepTypesAligned: true,
-            hideArchived: true,
             showFilter: true,
-            allowMultiSelect: false,
-            useColour: false
+            allowMultiSelect: true,
+            extendedCopy: false
         }
     },
     getSettingsFields: function() {
@@ -29,53 +27,103 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                 fieldLabel: 'Show Advanced filter',
                 name: 'showFilter',
                 labelAlign: 'top'
+            },
+            {
+                xtype: 'rallycheckboxfield',
+                fieldLabel: 'Extended Copy',
+                name: 'extendedCopy',
+                labelAlign: 'top'
             }
         ];
         return returned;
     },
     itemId: 'rallyApp',
-        STORE_FETCH_FIELD_LIST:
-            [
-                'Name',
-                'FormattedID',
-                'Parent',
-                'DragAndDropRank',
-                'Children',
-                'ObjectID',
-                'Project',
-                'DisplayColor',
-                'Owner',
-                'Blocked',
-                'BlockedReason',
-                'Ready',
-                'Tags',
-                'Workspace',
-                'RevisionHistory',
-                'CreationDate',
-                'PercentDoneByStoryCount',
-                'PercentDoneByStoryPlanEstimate',
-                'PredecessorsAndSuccessors',
-                'State',
-                'PreliminaryEstimate',
-                'Description',
-                'Notes',
-                'Predecessors',
-                'Successors',
-                'OrderIndex',   //Used to get the State field order index
-                'PortfolioItemType',
-                'Ordinal',
-                'Release',
-                'Iteration',
-                'Milestones',
-                'UserStories',
+
+    // Defaults are those used to decide on the tree
+    // Extended are all those that get copied with extendedCopy set
+    //##TODO Custom fields will be used to do a mapping
+    fieldList: {
+        'portfoliotemLevelXFields': {
+            defaults: ['State', 'PortfolioItemType', 'Children'],
+            custom: []
+        },
+
+        'portfolioitemLevel1Fields': {
+            defaults: ['State', 'PortfolioItemType', 'UserStories'],
+            custom: []
+        },
+
+        'userstoryFields': {
+            defaults: ['ScheduleState', 'Defects', 'Tasks', 'TestCases', 'Children'],
+            custom: []
+        },
+
+        'defectFields': {
+            defaults: ['State','Tasks', 'TestCases'],
+            custom: []
+        },
+
+        'taskFields': {
+            defaults: ['State', 'ToDo'],
+            custom: []
+        },
+
+        'testcaseFields': {
+            defaults: [],
+            extended: ['Method', 'Objective','Package', 'PostConfitions', 'PreConditions' ],
+            custom: []
+        },
+
+        'testcasestepFields': {
+            defaults: [],
+            extended: ['ExpectedResult', 'Input' ],
+            custom: []
+        }
+    },
+
+        //The inital fields that help you decide on what items are important. When we come to do the copy
+        //we will copy as many fields as we can depending on the type of artefact
+        //We fetch Attachments, Tags, etc., so we can count them to give stats to the user.
+        //The less data you ask for the quicker the initial search will be (network traffic)
+    REQUIRED_FETCH_LIST:
+    [
                 'Attachments',
+//                'CreationDate',
+//                'Description',
+//                'DisplayColor',
+//                'DragAndDropRank',
+                'FormattedID',
+//                'Iteration',
+//                'Milestones',
+//                'Name',
+//                'Notes',
+                'ObjectID',
+                'OrderIndex', 
+                'Ordinal',
+//                'Owner',
+//                'Parent',
+//                'PercentDoneByStoryCount',
+//                'PercentDoneByStoryPlanEstimate',
+                
+//                'Predecessors',
+                'PredecessorsAndSuccessors',
+//                'PreliminaryEstimate',
+                'Project',
+//                'Ready',
+//                'Release',
+                'RevisionHistory',
+//                'Successors',
+                'Tags',
+                'Type',
+//                'Workspace',
+
                 //Customer specific after here. Delete as appropriate
-                'c_ProjectIDOBN',
-                'c_QRWP',
-                'c_ProgressUpdate',
-                'c_RAIDSeverityCriticality',
-                'c_RISKProbabilityLevel',
-                'c_RAIDRequestStatus'   
+                // 'c_ProjectIDOBN',
+                // 'c_QRWP',
+                // 'c_ProgressUpdate',
+                // 'c_RAIDSeverityCriticality',
+                // 'c_RISKProbabilityLevel',
+                // 'c_RAIDRequestStatus'   
             ],
 
     items: [
@@ -199,7 +247,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
             stateId: this.getContext().getScopedStateId('itemSelector'),
             storeConfig: {
                 models: [ 'portfolioitem/' + ptype.rawValue ],
-                fetch: gApp.STORE_FETCH_FIELD_LIST,
+                fetch: gApp.INITIAL_FETCH_LIST,
                 context: gApp.getContext().getDataContext(),
                 pageSize: 200,
                 autoLoad: true
@@ -217,17 +265,6 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
             startAgain: function () {
                 var records = gApp.down('#itemSelector').valueModels;
                 if ( gApp._nodes) gApp._nodes = [];
-                if (records && (records.length > 1)) {
-                        gApp._nodes.push({'Name': 'Combined View',
-                        'record': {
-                            'data': {
-                                '_ref': 'root',
-                                'Name': ''
-                            }
-                        },
-                        'local':true
-                    });
-                }
                 gApp._topLevel(records);
             }
         });   
@@ -281,30 +318,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                         items: {
                             xtype: 'component',
                             html: 
-                                '<p class="boldText">Hierarchical Tree View</p>' +
-                                '<p>This app will find all the children of a particular Portfolio artefact. You can choose the type of artefact,' +
-                                ' then the top level artefact itself.</p>' +
-                                '<p>The colours of the circles indicate the state of progress from red (those that are not started), through to' +
-                                ' blue (in their final stages). Click on the "Colour Codes" button to see the colour to state mapping for each' +
-                                ' portfolio item type.</p>' +
-                                '<p class="boldText">Choosing collections</p>' +
-                                '<p>The app settings contains an option to allow you to multi-select the top level artefacts. This allows you to' +
-                                ' choose a number of portfolio items of interest and then filter for the features</p>' +
-                                '<p class="boldText">Visualising Dependencies</p>' +
-                                '<p>The edge of the circle will be red if there are any dependencies (predecessors or successors) and the colour ' +
-                                'of the associated text will indicate those with predecessors (red text) and those with successors (green text). ' +
-                                'Those with both will appear as having predecessors</p>' +
-                                '<p>If the text is blinking, it means that the relevant dependency is not being shown in this data set. </p>' +
-                                '<p class="boldText">Exploring the data</p><p>You can investigate dependencies by using &lt;shift&gt;-Click ' +
-                                'on the circle. This will call up an overlay with the relevant dependencies. Clicking on the FormattedID on any' +
-                                ' artefact in the overlay will take you to it in either the EDP or QDP page (whichever you have enabled for your' +
-                                ' session )</p>' +
-                                '<p>If you click on the circle without using shift, then a data panel will appear containing more information about that artefact</p>' +
-                                '<p class="boldText">Filtering</p>' +
-                                '<p>There are app settings to enable the extra filtering capabilities on the main page, so that you can choose which lowest-level portfolio items to see' +
-                                ' e.g. filter on Owner, Investment Type, etc. </p><p>To filter by release (e.g. to find all those features scheduled into a Program Increment)' +
-                                ' you will need to edit the Page settings (not the App Settings) to add a Release or Milestone filter</p>' +
-                                '<p>Source code available here: <br/><a href=https://github.com/nikantonelli/PortfolioItem-Tree-With-Dependencies> Github Repo</a></p>',
+                                '<p class="boldText">Hierarchical Tree Copy</p>',
                             padding: 10
                         }
                     });
@@ -314,11 +328,131 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
     },
 
 
+    _checkModelEquality: function(){
+        var deferred = Ext.create('Deft.Deferred');
+        debugger;
+        //Give the user a modal shows issues and that asks if you want to continue. If not, reject the deferred
+        deferred.reject(); //Dummy 
+
+        return deferred.promise;
+    },
+
+    _addDependencies: function(){
+        var deferred = Ext.create('Deft.Deferred');
+        gApp.setLoading('Copying dependencies');
+
+        gApp.setLoading(false);
+        deferred.resolve(); //Dummy 
+        
+        return deferred.promise;
+    },
+
+    _copyTags: function(){
+        var deferred = Ext.create('Deft.Deferred');
+        gApp.setLoading('Copying tags');
+
+        gApp.setLoading(false);
+        deferred.resolve(); //Dummy 
+        
+        return deferred.promise;
+    },
+
+    _attachRevisionHistroy: function(){
+        var deferred = Ext.create('Deft.Deferred');
+        gApp.setLoading('Copying revision histories as attachment');
+
+        gApp.setLoading(false);
+        deferred.resolve(); //Dummy 
+        
+        return deferred.promise;
+    },
+
+    _createTargetCopy: function(){
+        var deferred = Ext.create('Deft.Deferred');
+        gApp.setLoading('Copying items');
+
+        gApp.setLoading(false);
+        deferred.resolve(); //Dummy 
+        
+        return deferred.promise;
+    },
+
+    _getTargetModels: function(){
+        var deferred = Ext.create('Deft.Deferred');
+        gApp.setLoading('Fetching target models');
+
+        gApp.setLoading(false);
+        deferred.resolve(); //Dummy 
+        
+        return deferred.promise;
+    },
+
+    _getSourceModels: function(){
+        var deferred = Ext.create('Deft.Deferred');
+        gApp.setLoading('Fetching source models');
+
+        gApp.setLoading(false);
+        deferred.resolve(); //Dummy 
+        
+        return deferred.promise;
+    },
+
+    _mainAction: function(){
+
+        var calls = [
+            gApp._getTargetModels,
+            gApp._getSourceModels,
+            gApp._checkModelEquality,
+            gApp._createTargetCopy
+        ];
+
+        var extendedCalls = [
+            gApp._copyTags,
+            gApp._attachRevisionHistroy,
+            gApp._addDependencies    //Within the group we have and warn about external ones!
+        ];
+
+        if (gApp.getSetting('extendedCopy' === true)) {
+            calls = calls.concat(extendedCalls);
+        }
+
+        Deft.Chain.sequence(
+            calls, this).then({
+            success: function() {
+                debugger;
+            },
+            failure: function() {
+                debugger;
+            }
+        });
+
+        gApp.nodeTree.eachBefore( function(d) {
+            console.log('This: ' + d.id, ', Parent: ' + (d.parent ? d.parent.id: 'null'));
+        })
+
+    },
+
     _topLevel: function(data) {
+
+        gApp.setLoading('Fetching hierarchy');
+        //d3.stratify needs a single top level item
+        if (data.length >1) {
+            gApp._nodes.push( {
+            'Name': 'R0',
+            'Parent': null,
+            'Record': null,
+
+            });
+            gApp._nodes = gApp._nodes.concat(gApp._createNodes(data, 'R0'));
+
+        }else {
+            gApp._nodes = gApp._createNodes(data, null);
+        }
         gApp._recurseLevel(data).then ({
             success: function() {
-                console.log(gApp._nodes);
-                debugger;
+                gApp.setLoading(false);
+                gApp.nodeTree = gApp._createTree(gApp._nodes);
+                gApp._mainAction();
             }
         })
     },
@@ -350,6 +484,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
     _processResult: function (type, record, records, success, promise) {
         if (success) {
             if (records && records.length)  {
+                gApp._nodes = gApp._nodes.concat(gApp._createNodes(records, record.get('FormattedID')))
                 console.log('Recursing for record: ' + record.get('FormattedID'));
                 gApp._recurseLevel(records).then ({
                     success: function() {
@@ -363,7 +498,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                 });
             }
             else {
-                console.log('Nothing to do for ' + record.get('FormattedID'));
+                console.log('Nothing to do for type ' + type + ' for ' + record.get('FormattedID'));
                 promise.resolve();
             }
         }
@@ -374,12 +509,8 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
     },
 
     _getArtifacts: function(record) {
-        //On re-entry send an event to redraw
-        var newNode = gApp._createNodes([record]);
-        gApp._nodes = gApp._nodes.concat( newNode);    //Add what we started with to the node list
 
         console.log('Adding: ' + record.get('FormattedID'));
-
         var promises = [];
 
         //Starting with highest selected by the combobox, go down
@@ -396,21 +527,13 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                             direction: 'ASC'
                         }
                     ],
-                    fetch: gApp.STORE_FETCH_FIELD_LIST,
+                    fetch: gApp.INITIAL_FETCH_LIST,
                     callback: function(records, operation, success) {
                         //Start the recursive trawl down through the levels
                         gApp._processResult('Children', record, records, success, childPromise);
                     },
                     filters: []
                 };
-                //Archived only exists on Portfolio items
-                if (gApp.getSetting('hideArchived')&& (!record.data._ref.includes('hierarchicalrequirement'))){ 
-                    childrenConfig.filters.push({
-                        property: 'Archived',
-                        operator: '=',
-                        value: false
-                    });
-                }
 
                 if(gApp.getSetting('showFilter') && gApp.advFilters && gApp.advFilters.length > 0){
                     Ext.Array.each(gApp.advFilters,function(filter){
@@ -432,7 +555,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                             direction: 'ASC'
                         }
                     ],
-                    fetch: gApp.STORE_FETCH_FIELD_LIST,
+                    fetch: gApp.INITIAL_FETCH_LIST,
                     callback: function(records, operation, success) {
                         //Start the recursive trawl down through the levels
                         gApp._processResult('User Story', record, records, success, usPromise);
@@ -461,7 +584,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                             direction: 'ASC'
                         }
                     ],
-                    fetch: gApp.STORE_FETCH_FIELD_LIST,
+                    fetch: gApp.INITIAL_FETCH_LIST,
                     callback: function(records, operation, success) {
                         //Start the recursive trawl down through the levels
                         gApp._processResult('Defect', record, records, success, defectPromise);
@@ -486,7 +609,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                         property: 'DragAndDropRank',
                         direction: 'ASC'  
                     }],
-                    fetch: gApp.STORE_FETCH_FIELD_LIST,
+                    fetch: gApp.INITIAL_FETCH_LIST,
                     callback: function(records, operation, success) {
                         gApp._processResult('Task', record, records, success, taskPromise);
                     }
@@ -503,7 +626,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                         property: 'DragAndDropRank',
                         direction: 'ASC'  
                     }],
-                    fetch: gApp.STORE_FETCH_FIELD_LIST,
+                    fetch: gApp.INITIAL_FETCH_LIST,
                     callback: function(records, operation, success) {
                         gApp._processResult('TestCase', record, records, success, testCasePromise);
                     }
@@ -521,7 +644,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                         property: 'DragAndDropRank',
                         direction: 'ASC'  
                     }],
-                    fetch: gApp.STORE_FETCH_FIELD_LIST,
+                    fetch: gApp.INITIAL_FETCH_LIST,
                     callback: function(records, operation, success) {
                         gApp._processResult('TestCaseStep', record, records, success, testCaseStepPromise);
                     }
@@ -535,13 +658,16 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         return promises;
     },
 
-    _createNodes: function(data) {
+    _createNodes: function(data, parent) {
         //These need to be sorted into a hierarchy based on what we have. We are going to add 'other' nodes later
         var nodes = [];
         //Push them into an array we can reconfigure
         _.each(data, function(record) {
-            var localNode = (gApp.getContext().getProjectRef() === record.get('Project')._ref);
-            nodes.push({'Name': record.get('FormattedID'), 'record': record, 'local': localNode, 'dependencies': []});
+            nodes.push({
+                'Name': record.get('FormattedID'), 
+                'Parent': parent,
+                'Record': record, 
+            });
         });
         return nodes;
     },
@@ -640,34 +766,18 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         //Try to use d3.stratify to create nodet
         var nodetree = d3.stratify()
                     .id( function(d) {
-                        var retval = (d.record && d.record.data._ref) || null; //No record is an error in the code, try to barf somewhere if that is the case
+                        var retval = d.Name;
                         return retval;
                     })
                     .parentId( function(d) {
-                        var pParent = gApp._findParentNode(nodes, d);
-                        return (pParent && pParent.record && pParent.record.data._ref); })
+                        return d.Parent;
+                    })
                     (nodes);
         return nodetree;
     },
 
-    refetchTree: function() {
-        gApp._enterMainApp();
-    },
-
-    _getNodeId: function(d){
-        if (d.data.record.data._ref === 'root') { return Ext.id();}
-        return d.data.record? d.data.record.get('FormattedID'): Ext.id();
-    },
-
     launch: function() {
 
-        this.on('refetchTree', this.refetchTree);
     },
-
-    initComponent: function() {
-        this.callParent(arguments);
-        this.addEvents('refetchTree');
-    },
-
 });
 }());
