@@ -39,25 +39,25 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
     },
     itemId: 'rallyApp',
 
-    // Defaults are those used to decide on the tree
+    // Defaults are those used to decide on the tree and the basic fields you want over
     // Extended are all those that get copied with extendedCopy set
     //##TODO Custom fields will be used to do a mapping
     fieldList: {
         'portfoliotemLevelUpper': {
-            default: ['State', 'PortfolioItemType', 'Children'],
-            extended: [],
+            default: ['State', 'PortfolioItemType', 'PreliminaryEstimate', 'Children'],
+            extended: ['Ready'],
             custom: []
         },
 
         'portfolioitemLevel0': {
-            default: ['State', 'PortfolioItemType', 'UserStories'],
-            extended: [],
+            default: ['State', 'PortfolioItemType', 'PreliminaryEstimate', 'UserStories'],
+            extended: ['Ready'],
             custom: []
         },
 
         'HierarchicalRequirement': {
-            default: ['ScheduleState', 'Defects', 'Tasks', 'TestCases', 'Children'],
-            extended: [],
+            default: ['ScheduleState', 'Defects', 'Tasks', 'TestCases', 'PlanEstimate', 'Children'],
+            extended: ['Ready'],
             custom: []
         },
 
@@ -101,7 +101,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
 //                'Iteration',
 //                'Milestones',
 //                'Name',
-//                'Notes',
+                'Notes',        //We are going to add the new/old formattedID in the notes
                 'ObjectID',
                 'OrderIndex', 
                 'Ordinal',
@@ -197,7 +197,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                 {
                     xtype:  'rallyportfolioitemtypecombobox',
                     itemId: 'piType',
-                    fieldLabel: 'Choose Portfolio Type :',
+                    fieldLabel: '1: Choose Portfolio Type :',
                     labelWidth: 100,
                     margin: '5 0 5 20',
                     defaultSelectionPosition: 'first',
@@ -257,7 +257,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         }
         var is = hdrBox.insert(1,{
             xtype: 'rallyartifactsearchcombobox',
-            fieldLabel: 'Choose Start Item :',
+            fieldLabel: '2: Choose Start Item :',
             itemId: 'itemSelector',
             multiSelect: gApp.getSetting('allowMultiSelect'),
             labelWidth: 100,
@@ -401,6 +401,41 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         // We have all the models for target and source. Now do a check whether the models are compatible
         //If not, pop-up a modal to ask the user if they want to do the most possible or cancel
         // ##TODO
+
+        //for each model in the source, if it is a portfolioitem, then get the ordinal and compare against the target
+        //with the same ordinal. For all the fields listed for this model, see if there is equivalence
+
+        _.each(gApp.sourceModels, function(model) {
+            //If the model is portfolio, then find the model in the sourceTypeStore and get the ordinal
+            var ordinal = null;
+            var testFieldList = null;
+            var targetType = null;
+            debugger;
+            _.find(gApp.sourceTypeStore.getRecords(), function(type) {
+                if (type.get('TypePath').toLowerCase() === model.prettyTypeName) {
+                    ordinal = type.get('Ordinal');
+                    return true;
+                }
+                return false;
+            });
+            if ( ordinal === null) {
+                //We are not a portfolioitem here
+                testFieldList = gApp.fieldList[model.prettyTypeName];
+                targetType = model.prettyTypeName;
+            }
+            else {
+                //we are a portfolioitem
+                testFieldList = gApp.fieldList['portfolioitemLevel' + ((ordinal === 0) ? '0' : 'X')];
+                //Find the equivalent model in the target based on the ordinal
+                targetType = _.find(gApp.targetTypeStore.getRecords(), function(type) {
+                    if (type.get('Ordinal') === ordinal) {
+                        return true;
+                    }
+                    return false;
+                }).get('TypePath');
+                
+            }
+        });
         return deferred.promise;
     },
 
@@ -424,7 +459,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         return deferred.promise;
     },
 
-    _attachRevisionHistroy: function(){
+    _attachRevisionHistory: function(){
         var deferred = Ext.create('Deft.Deferred');
         gApp.setLoading('Copying revision histories as attachment');
 
@@ -966,7 +1001,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         {
             margin: '10 0 5 20',
             id: 'penguin',
-            fieldLabel: 'Choose Target  ',
+            fieldLabel: '3: Choose Target  ',
             topLevelStoreConfig: {
                 fetch: ['Name', 'Workspace']
             },
