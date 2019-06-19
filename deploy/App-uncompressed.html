@@ -405,23 +405,29 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
     },
 
     _checkModelEquality: function(){
-        var deferred = Ext.create('Deft.Deferred');
 
-        // We have all the models for target and source. Now do a check whether the models are compatible
-        //If not, pop-up a modal to ask the user if they want to do the most possible or cancel
-        // ##TODO
+        var deferred = Ext.create('Deft.Deferred');
+        // Check whether the models are compatible
+        // If not, pop-up a modal to ask the user if they want to do the most possible or cancel
 
         //for each model in the source, if it is a portfolioitem, then get the ordinal and compare against the target
         //with the same ordinal. For all the fields listed for this model, see if there is equivalence
 
-        _.each(gApp.sourceModels, function(model) {
+        var results = {
+            errorCount: 0,
+            incompatibleFieldTypes : [],
+            incompatibleFieldValues : {}
+        };
+
+        _.each(gApp.sourceModels, function(sourceModel) {
+            console.log('Checking: ' + sourceModel.prettyTypeName);
             //If the model is portfolio, then find the model in the sourceTypeStore and get the ordinal
             var ordinal = null;
             var testFieldList = null;
             var targetType = null;
-            debugger;
+            var targetModel = null;
             _.find(gApp.sourceTypeStore.getRecords(), function(type) {
-                if (type.get('TypePath').toLowerCase() === model.prettyTypeName) {
+                if (type.get('TypePath').toLowerCase() === sourceModel.prettyTypeName) {
                     ordinal = type.get('Ordinal');
                     return true;
                 }
@@ -429,11 +435,11 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
             });
             if ( ordinal === null) {
                 //We are not a portfolioitem here
-                testFieldList = gApp.fieldList[model.prettyTypeName];
-                targetType = model.prettyTypeName;
+                testFieldList = gApp._fieldFetchList( sourceModel.typeDefinition._refObjectName);
+                targetType = sourceModel.prettyTypeName;
             }
             else {
-                //we are a portfolioitem
+                //we are a portfolioitem xxxx
                 testFieldList = gApp.fieldList['portfolioitemLevel' + ((ordinal === 0) ? '0' : 'X')];
                 //Find the equivalent model in the target based on the ordinal
                 targetType = _.find(gApp.targetTypeStore.getRecords(), function(type) {
@@ -442,9 +448,103 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                     }
                     return false;
                 }).get('TypePath');
-                
             }
+            targetModel = gApp.targetModels[targetType];
+
+            var testFields = testFieldList.default;
+            if (gApp.getSetting('extendedCopy')) {
+                testFields = testFields.concat(testFieldList.extended);
+            }
+            //We should now have the source model, the destination model, the typestores (for the ordinal)
+            //Now run through the fields of interest (testFields) and check for compatibility
+
+
+            //Check all the fields to see if they are the same type. Each 'constrained' one, check for AllowedValues equivalence
+            _.each(testFields, function(fieldname) {
+                var sourceField = sourceModel.getField(fieldname);                
+                var targetField = targetModel.getField(fieldname);
+
+                if (( targetField === undefined) ||
+                    ( sourceField.attributeDefinition.AttributeType != targetField.attributeDefinition.AttributeType) ||
+                    ( sourceField.attributeDefinition.Constrained != targetField.attributeDefinition.Constrained))
+                {
+                    results.incompatibleFieldTypes.push(fieldname);
+                    results.errorCount++;
+                    return;
+                }
+                // Both are the same, so let's check for values
+                if (sourceField.attributeDefinition.Constrained === true)
+                {
+                    var missingValues = [];
+                    _.each( sourceField.attributeDefinition.AllowedValues, function( sourceAllowedValue) {
+                        if ( ! _.find(targetField.attributeDefinition.AllowedValues, function(targetAllowedValue){
+                                return sourceAllowedValue.StringValue === targetAllowedValue.StringValue;
+
+                        })) {
+                            missingValues.push(sourceAllowedValue.StringValue);
+                        }
+                    });
+                    if (missingValues.length > 0) {
+                        var fObj = {};
+                        var sObj = {};
+
+                        sObj[fieldname] = missingValues;
+                        fObj[sourceModel.elementName] = sObj;
+                        fObj.target = sourceModel.prettyTypeName,
+                        Ext.merge( results.incompatibleFieldValues, fObj);
+                        results.errorCount += 1;
+                    }
+                }
+            });
         });
+
+        var resultsString = JSON.stringify(results);
+        console.log('ModelChecks: ' + resultsString);
+        //If we have any problems, ask the user what to do
+        if (results.errorCount > 0) {
+
+            //Checks failed, so confirm ignore errors
+        }
+        else {
+            //Checks passed, so confirm and resolve the promise and continue
+            Ext.create('Rally.ui.dialog.Dialog', {
+                id: 'confirmCopy',
+                title: 'Checks passed. Start copy?',
+                width: 300,
+                height: 65,
+                shadow: false,
+                draggable: true,
+                autoShow: true,
+                closable: true,
+                layout: 'hbox',
+                items: [
+                    {
+                        xtype: 'rallybutton',
+                        text: 'Yes',
+                        width: '50%',
+                        handler: function() {
+                            deferred.resolve();
+                            this.ownerCt.destroy();
+                        }
+                    },
+                    {
+                        xtype: 'rallybutton',
+                        text: 'Cancel',
+                        width: '50%',
+                        handler: function() {
+                            deferred.reject();
+                            this.ownerCt.destroy();
+                        }
+                    }
+
+
+                ]
+            });
+        }
+
+        //If user wants to continue, we need to check for required fields in target and see if they are not 
+        //in the requested field list
+        //##TODO
         return deferred.promise;
     },
 
@@ -592,13 +692,14 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                 });
             },
             failure: function() {
-                Rally.ui.notify.Notifier.showWarning({message: 'Copy exiting (Tests Failed)'});
+                Rally.ui.notify.Notifier.showWarning({message: 'Copy exiting (Data checks failed)'});
             }
         });
     },
     
     _secondAction: function(data) {
 
+        var deferred = Ext.create('Deft.Deferred');
         var calls = [
             gApp._createTargetCopy
         ];
@@ -616,12 +717,13 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         Deft.Chain.sequence(
             calls, this).then({
             success: function() {
-                debugger;
+                deferred.resolve();
             },
             failure: function() {
-                debugger;
+                deferred.reject();
             }
         });
+        return deferred.promise;
     },
 
     _topLevel: function(data) {
@@ -633,9 +735,8 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
             gApp._nodes.push( {
             'Name': 'R0',
             'Parent': null,
-            'Record': null,
-            'Target': null
-
+            'sourceRecord': null,
+            'targetRecord': null,
             });
             gApp._nodes = gApp._nodes.concat(gApp._createNodes(data, 'R0'));
 
@@ -890,8 +991,8 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
             nodes.push({
                 'Name': record.get('FormattedID'), 
                 'Parent': parent,
-                'Record': record, 
-                'Target': null      //When we copy, this will be populated.
+                'sourceRecord': record, 
+                'targetRecord': null //When we copy, this will be populated.
             });
         });
         return nodes;
