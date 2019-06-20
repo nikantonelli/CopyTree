@@ -42,27 +42,27 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
     // Defaults are those used to decide on the tree and the basic fields you want over
     // Extended are all those that get copied with extendedCopy set
     //##TODO Custom fields will be used to do a mapping
-    fieldList: {
+    copyFields: {
         'portfoliotemLevelUpper': {
-            default: ['State', 'PortfolioItemType', 'PreliminaryEstimate', 'Children'],
-            extended: ['Ready'],
+            default: ['State', 'PreliminaryEstimate' ],
+            extended: [],
             custom: []
         },
 
         'portfolioitemLevel0': {
-            default: ['State', 'PortfolioItemType', 'PreliminaryEstimate', 'UserStories'],
-            extended: ['Ready'],
+            default: ['State', 'PreliminaryEstimate'],
+            extended: [],
             custom: []
         },
 
         'HierarchicalRequirement': {
-            default: ['ScheduleState', 'Defects', 'Tasks', 'TestCases', 'PlanEstimate', 'Children'],
-            extended: ['Ready'],
+            default: ['ScheduleState', 'FlowState',  'PlanEstimate', ],
+            extended: [],
             custom: []
         },
 
         'Defect': {
-            default: ['State','Tasks', 'TestCases'],
+            default: ['State'],
             extended: [],
             custom: []
         },
@@ -74,62 +74,75 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         },
 
         'TestCase': {
-            default: [],
-            extended: ['Method', 'Objective','Package', 'PostConditions', 'PreConditions' ],
+            default: ['Method', 'Type'],
+            extended: ['Objective', 'Package', 'PostConditions', 'PreConditions'],
             custom: []
         },
 
         'TestCaseStep': {
-            default: [],
-            extended: ['ExpectedResult', 'Input' ],
+            default: ['ExpectedResult', 'Input' ],
+            extended: [],
             custom: []
         }
+    },
+
+    copyCommon: {
+        default: ['Name', 'Project'],   //Project will be overwritten for the target. If we fetch it, we can use it later...
+        extended: ['Notes', 'Ready', 'Description'],
+        custom: []
     },
 
         //The inital fields that help you decide on what items are important. When we come to do the copy
         //we will copy as many fields as we can depending on the type of artefact
         //We fetch Attachments, Tags, etc., so we can count them to give stats to the user.
         //The less data you ask for the quicker the initial search will be (network traffic)
-    requiredFetchList:
+    decisionFields:
     [
-                'Attachments',
+        'Attachments',
+        'Children',
 //                'CreationDate',
 //                'Description',
 //                'DisplayColor',
 //                'DragAndDropRank',
-                'FormattedID',
+        'FormattedID',
 //                'Iteration',
 //                'Milestones',
-//                'Name',
-                'Notes',        //We are going to add the new/old formattedID in the notes
-                'ObjectID',
-                'OrderIndex', 
-                'Ordinal',
+        'Defects',
+        'Name',
+        'Notes',        //We are going to add the new/old formattedID in the notes
+        'ObjectID',
+        'OrderIndex', 
+        'Ordinal',
 //                'Owner',
 //                'Parent',
 //                'PercentDoneByStoryCount',
 //                'PercentDoneByStoryPlanEstimate',
-                'PortfolioItemType',
+        'PortfolioItemType',
 //                'Predecessors',
-                'PredecessorsAndSuccessors',
+        'PredecessorsAndSuccessors',
 //                'PreliminaryEstimate',
-                'Project',
+        'Project',
 //                'Ready',
 //                'Release',
-                'RevisionHistory',
+        'RevisionHistory',
 //                'Successors',
-                'Tags',
-                'Type',
-//                'Workspace',
+        'Tags',
+        'Tasks',
+        'TestCases',
+        'Type',
+        'UserStories',
+        'Workspace',
 
-                //Customer specific after here. Delete as appropriate
-                // 'c_ProjectIDOBN',
-                // 'c_QRWP',
-                // 'c_ProgressUpdate',
-                // 'c_RAIDSeverityCriticality',
-                // 'c_RISKProbabilityLevel',
-                // 'c_RAIDRequestStatus'   
-            ],
+        //Customer specific after here. Delete as appropriate
+        // 'c_ProjectIDOBN',
+        // 'c_QRWP',
+        // 'c_ProgressUpdate',
+        // 'c_RAIDSeverityCriticality',
+        // 'c_RISKProbabilityLevel',
+        // 'c_RAIDRequestStatus'   
+    ],
+
+    modelMaps: {},
 
     items: [
         {  
@@ -147,7 +160,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         }
     ],
 
-    _fieldFetchList: function(modelType){
+    _copyFieldList: function(modelType){
         var fieldListName = '';
         
         //For portfolioitems, we need to know what ordinal we are (so as not to use hardcoded names in this program)
@@ -165,11 +178,11 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
             fieldListName = modelType;
         }
         if ( gApp.getSetting('extendedCopy')) {
-            return gApp.requiredFetchList.concat(gApp.fieldList[fieldListName].default
-                .concat(gApp.fieldList[fieldListName].extended));
+            return gApp.copyCommon.extended.concat(gApp.copyCommon.default.concat(gApp.copyFields[fieldListName].default
+                .concat(gApp.copyFields[fieldListName].extended)));
         }
         else {
-            return gApp.requiredFetchList.concat(gApp.fieldList[fieldListName].default);
+            return gApp.copyCommon.default.concat(gApp.copyFields[fieldListName].default);
         }
     },
 
@@ -270,7 +283,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
             stateId: this.getContext().getScopedStateId('itemSelector'),
             storeConfig: {
                 models: [ ptype.getRecord().get('TypePath').toLowerCase() ],
-                fetch: gApp._fieldFetchList(ptype.getRecord().get('TypePath')),
+                fetch: gApp.decisionFields,
                 context: gApp.getContext().getDataContext(),
                 pageSize: 200,
                 autoLoad: true
@@ -407,16 +420,22 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         var results = {
             errorCount: 0,
             modelMaps: {},
-            incompatibleFieldTypes : [],
-            requiredFieldsMissing: [],
-            incompatibleFieldValues : {}
+            fatalErrors: {
+                errorCount: 0,
+                incompatibleFieldTypes : [],
+                requiredFieldsMissing: []
+            },
+            recoverableErrors: {
+                errorCount: 0,
+                incompatibleFieldValues : {}
+            }
         };
+        var testFieldConfig = [];
 
         _.each(gApp.sourceModels, function(sourceModel) {
             console.log('Checking: ' + sourceModel.prettyTypeName);
             //If the model is portfolio, then find the model in the sourceTypeStore and get the ordinal
             var ordinal = null;
-            var testFieldList = null;
             var targetType = null;
             var targetModel = null;
             _.find(gApp.sourceTypeStore.getRecords(), function(type) {
@@ -426,14 +445,14 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                 }
                 return false;
             });
+
+            testFieldConfig = gApp._copyFieldList( sourceModel.typeDefinition._refObjectName);
             if ( ordinal === null) {
                 //We are not a portfolioitem here, so we are identical names
-                testFieldList = gApp._fieldFetchList( sourceModel.typeDefinition._refObjectName);
                 targetType = sourceModel.typePath;
             }
             else {
                 //we are a portfolioitem 
-                testFieldList = gApp.fieldList['portfolioitemLevel' + ((ordinal === 0) ? '0' : 'X')];
                 //Find the equivalent model in the target based on the ordinal
                 targetType = _.find(gApp.targetTypeStore.getRecords(), function(type) {
                     if (type.get('Ordinal') === ordinal) {
@@ -443,11 +462,10 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                 }).get('TypePath');
             }
             targetModel = gApp.targetModels[targetType];
-            debugger;
-            results.modelMaps[sourceModel.prettyTypeName] = targetModel.prettyTypeName;
-            var testFields = testFieldList.default;
+            gApp.modelMaps[sourceModel.typeDefinition._refObjectName] = targetModel.typeDefinition._refObjectName;
+            var testFields = testFieldConfig.default;
             if (gApp.getSetting('extendedCopy')) {
-                testFields = testFields.concat(testFieldList.extended);
+                testFields = testFields.concat(testFieldConfig.extended);
             }
             //We should now have the source model, the destination model, the typestores (for the ordinal)
             //Now run through the fields of interest (testFields) and check for compatibility
@@ -462,8 +480,9 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                     ( sourceField.attributeDefinition.AttributeType != targetField.attributeDefinition.AttributeType) ||
                     ( sourceField.attributeDefinition.Constrained != targetField.attributeDefinition.Constrained))
                 {
-                    results.incompatibleFieldTypes.push(fieldname);
-                    results.errorCount++;
+                    results.fatalErrors.incompatibleFieldTypes.push(fieldname);
+                    results.errorCount += 1;
+                    results.fatalErrors.errorCount += 1;
                     return;
                 }
                 // Both are the same, so let's check for values
@@ -488,23 +507,51 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                             'type' : targetModel.prettyTypeName,
                         };
                         fObj[sourceModel.elementName] = sObj;
-                        Ext.merge( results.incompatibleFieldValues, fObj);
+                        Ext.merge( results.recoverableErrors.incompatibleFieldValues, fObj);
                         results.errorCount += 1;
+                        results.recoverableErrors.errorCount += 1;
                     }
                 }
             });
         });
 
+        results.modelMaps = gApp.modelMaps;
+
         //We need to check for required fields in target and see if they are not 
         //in the requested field list
         //##TODO
+
+        //Get the target models, look through for required fields and then check they are in the fieldList for that type
+        _.each(gApp.targetModels, function(model) {
+            var sourceType = _.invert(gApp.modelMaps)[model.typeDefinition._refObjectName];
+            //If we are trying to transfer that type, then get the source type fieldlist
+            if (sourceType !== undefined) {
+                var wantedFields = gApp._copyFieldList(sourceType);
+                _.each( model.getFields(), function (modelField) {
+                    if (( modelField.hidden === false) &&
+                        ( modelField.required === true) && 
+                        ( modelField.readOnly === false) &&
+                        ( -1 === wantedFields.indexOf(modelField.name))
+                        ) {
+                            results.errorCount += 1;
+                            results.fatalErrors.errorCount += 1;
+                            results.fatalErrors.requiredFieldsMissing.push(
+                                {
+                                    'type' : model.typeDefinition._refObjectName,
+                                    'field' : modelField.displayName
+                                }
+                            );
+                    }
+                });
+            }
+        });
 
         var resultsString = JSON.stringify(results, undefined, 4);
         console.log('ModelChecks: ' + resultsString);
         //If we have any problems, ask the user what to do
         if (results.errorCount > 0) {
             var titleString = 'Checks Failed. ';
-            if (results.requiredFieldsMissing.length === 0) {
+            if (results.fatalErrors.errorCount === 0) {
                 titleString += 'Ignore and copy?';
             } else {
                 titleString += 'Required Fields Missing';
@@ -525,10 +572,13 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                         xtype: 'rallybutton',
                         text: 'OK',
                         width: '33%',
-                        disabled: (results.requiredFieldsMissing.length > 0),
+                        disabled: (results.fatalErrors.errorCount > 0),
                         handler: function() {
                             // ##TODO Update the field list to remove those we had errors for.
                             
+                            // !! We do not need to check for AllowedValues on target fields as we will be given a valid value
+                            // when the ModelFactory gives it to us. We just remove the field from the list and leave the value alone.
+
                             deferred.resolve(results);
                             this.ownerCt.destroy();
                         }
@@ -629,6 +679,24 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         var deferred = Ext.create('Deft.Deferred');
         gApp.setLoading('Copying items');
 
+        //Get all the nodes in the hierarchy
+        gApp._nodeTree.eachBefore( function(node) {
+
+debugger;
+            //Create a target model instance and connect it to this nodes data
+            var sourceType = node.data.sourceRecord.raw._type;
+            var modelMapped = gApp.modelMaps[sourceType];
+            var targetModel = gApp.targetModels[modelMapped];
+            var fieldConfig = {};
+            _.each( gApp._copyFieldList(sourceType), function(fieldName) {
+                var data = node.data.sourceRecord.get(fieldName);
+                fieldConfig[fieldName] = data;
+            });
+            fieldConfig['Notes'] = '<div>Created from ' + node.data.sourceRecord.get('FormattedID') + 
+                            ' (' + gApp._getTargetWorkspace()._ref + ' ) </div>' + fieldConfig['Notes'];
+            node.data.targetRecord = Ext.create(targetModel, Ext.clone(fieldConfig));
+        });
+debugger;
         gApp.setLoading(false);
         deferred.resolve(); //Dummy 
         
@@ -739,7 +807,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                 });
             },
             failure: function() {
-                Rally.ui.notify.Notifier.showWarning({message: 'Copy exiting (Data checks failed)'});
+                Rally.ui.notify.Notifier.showWarning({message: 'Copy exiting (Data check abort)'});
             }
         });
     },
@@ -898,7 +966,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                         }
                     ],
                     //Need to identify the child type to determine what fields we want.
-                    fetch: gApp._fieldFetchList(record.get('Children')._type),
+                    fetch: gApp.decisionFields,
                     callback: function(records, operation, success) {
                         //Start the recursive trawl down through the levels
                         gApp._processResult('Children', record, records, success, childPromise);
@@ -926,7 +994,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                             direction: 'ASC'
                         }
                     ],
-                    fetch: gApp._fieldFetchList(record.get('UserStories')._type),
+                    fetch: gApp.decisionFields,
                     callback: function(records, operation, success) {
                         //Start the recursive trawl down through the levels
                         gApp._processResult('UserStories', record, records, success, usPromise);
@@ -955,7 +1023,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                             direction: 'ASC'
                         }
                     ],
-                    fetch: gApp._fieldFetchList(record.get('Defects')._type),
+                    fetch: gApp.decisionFields,
                     callback: function(records, operation, success) {
                         //Start the recursive trawl down through the levels
                         gApp._processResult('Defects', record, records, success, defectPromise);
@@ -980,7 +1048,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                         property: 'DragAndDropRank',
                         direction: 'ASC'  
                     }],
-                    fetch: gApp._fieldFetchList(record.get('Tasks')._type),
+                    fetch: gApp.decisionFields,
                     callback: function(records, operation, success) {
                         gApp._processResult('Tasks', record, records, success, taskPromise);
                     }
@@ -997,7 +1065,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                         property: 'DragAndDropRank',
                         direction: 'ASC'  
                     }],
-                    fetch: gApp._fieldFetchList(record.get('TestCases')._type),
+                    fetch: gApp.decisionFields,
                     callback: function(records, operation, success) {
                         gApp._processResult('TestCases', record, records, success, testCasePromise);
                     }
@@ -1015,7 +1083,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                         property: 'DragAndDropRank',
                         direction: 'ASC'  
                     }],
-                    fetch: gApp._fieldFetchList(record.get('Steps')._type),
+                    fetch: gApp.decisionFields,
                     callback: function(records, operation, success) {
                         gApp._processResult('TestCaseSteps', record, records, success, testCaseStepPromise);
                     }
