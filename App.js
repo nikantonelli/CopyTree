@@ -406,7 +406,9 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
 
         var results = {
             errorCount: 0,
+            modelMaps: {},
             incompatibleFieldTypes : [],
+            requiredFieldsMissing: [],
             incompatibleFieldValues : {}
         };
 
@@ -425,12 +427,12 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                 return false;
             });
             if ( ordinal === null) {
-                //We are not a portfolioitem here
+                //We are not a portfolioitem here, so we are identical names
                 testFieldList = gApp._fieldFetchList( sourceModel.typeDefinition._refObjectName);
-                targetType = sourceModel.prettyTypeName;
+                targetType = sourceModel.typePath;
             }
             else {
-                //we are a portfolioitem xxxx
+                //we are a portfolioitem 
                 testFieldList = gApp.fieldList['portfolioitemLevel' + ((ordinal === 0) ? '0' : 'X')];
                 //Find the equivalent model in the target based on the ordinal
                 targetType = _.find(gApp.targetTypeStore.getRecords(), function(type) {
@@ -441,7 +443,8 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                 }).get('TypePath');
             }
             targetModel = gApp.targetModels[targetType];
-
+            debugger;
+            results.modelMaps[sourceModel.prettyTypeName] = targetModel.prettyTypeName;
             var testFields = testFieldList.default;
             if (gApp.getSetting('extendedCopy')) {
                 testFields = testFields.concat(testFieldList.extended);
@@ -479,9 +482,12 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                         var fObj = {};
                         var sObj = {};
 
-                        sObj[fieldname] = missingValues;
+                        sObj[fieldname] = {
+                            'missing': missingValues,
+                            'in' : gApp._getTargetWorkspace().Name,
+                            'type' : targetModel.prettyTypeName,
+                        };
                         fObj[sourceModel.elementName] = sObj;
-                        fObj.target = sourceModel.prettyTypeName,
                         Ext.merge( results.incompatibleFieldValues, fObj);
                         results.errorCount += 1;
                     }
@@ -489,17 +495,70 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
             });
         });
 
-        var resultsString = JSON.stringify(results);
+        //We need to check for required fields in target and see if they are not 
+        //in the requested field list
+        //##TODO
+
+        var resultsString = JSON.stringify(results, undefined, 4);
         console.log('ModelChecks: ' + resultsString);
         //If we have any problems, ask the user what to do
         if (results.errorCount > 0) {
+            var titleString = 'Checks Failed. ';
+            if (results.requiredFieldsMissing.length === 0) {
+                titleString += 'Ignore and copy?';
+            } else {
+                titleString += 'Required Fields Missing';
+            }
 
             //Checks failed, so confirm ignore errors
+            Ext.create('Rally.ui.dialog.Dialog', {
+                title: titleString,
+                width: 300,
+                height: 65,
+                shadow: false,
+                draggable: true,
+                autoShow: true,
+                closable: true,
+                layout: 'hbox',
+                items: [
+                    {
+                        xtype: 'rallybutton',
+                        text: 'OK',
+                        width: '33%',
+                        disabled: (results.requiredFieldsMissing.length > 0),
+                        handler: function() {
+                            // ##TODO Update the field list to remove those we had errors for.
+                            
+                            deferred.resolve(results);
+                            this.ownerCt.destroy();
+                        }
+                    },{
+                        xtype: 'rallybutton',
+                        text: 'View',
+                        width: '33%',
+                        handler: function() {
+                            // Give them a file with the json variant of stuff
+                            window.open(window.URL.createObjectURL(new Blob([resultsString], {type: 'text/json'})), '_blank');
+                        }
+                    },
+                    {
+                        xtype: 'rallybutton',
+                        text: 'Cancel',
+                        width: '33%',
+                        handler: function() {
+                            deferred.reject(results);
+                            this.ownerCt.destroy();
+                        }
+                    }
+
+
+                ]
+            });
+
         }
         else {
             //Checks passed, so confirm and resolve the promise and continue
             Ext.create('Rally.ui.dialog.Dialog', {
-                id: 'confirmCopy',
                 title: 'Checks passed. Start copy?',
                 width: 300,
                 height: 65,
@@ -514,7 +573,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                         text: 'Yes',
                         width: '50%',
                         handler: function() {
-                            deferred.resolve();
+                            deferred.resolve(results);
                             this.ownerCt.destroy();
                         }
                     },
@@ -523,7 +582,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                         text: 'Cancel',
                         width: '50%',
                         handler: function() {
-                            deferred.reject();
+                            deferred.reject(results);
                             this.ownerCt.destroy();
                         }
                     }
@@ -533,9 +592,6 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
             });
         }
 
-        //If user wants to continue, we need to check for required fields in target and see if they are not 
-        //in the requested field list
-        //##TODO
         return deferred.promise;
     },
 
@@ -753,7 +809,6 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         });
 
         if (promises.length > 0) {
-            console.log('Attempting ' + promises.length + ' promises');
             Deft.Promise.all(promises).then({
                 success: function() {
                     deferred.resolve();
