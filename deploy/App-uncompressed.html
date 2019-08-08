@@ -679,7 +679,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         gApp.setLoading('Copying dependencies');
 
         gApp.setLoading(false);
-        deferred.resolve(); //Dummy 
+        deferred.resolve('addDeps'); //Dummy 
         
         return deferred.promise;
     },
@@ -706,44 +706,61 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         //changed so that we (multithread?) control the number.
 
         if ( gApp._getSourceWorkspace().ObjectID !== gApp._getTargetWorkspace().ObjectID ) {
-
-            _.each(tags, function(tag) {
-                var msg = { 
-                    Tag: {
-                        Name: tag.Name
+            var tagStore = Ext.create('Rally.data.wsapi.Store', {
+                model: 'Tag',
+                fetch: true,
+                autoLoad: true,
+                listeners: {
+                    load: function(store, records) {
+                        _.each(tags, function(tag) {
+                            var msg = { 
+                                Name: tag.Name
+                            };
+                            store.add(msg);                    
+                        });
+                        store.sync().then ({
+                            success: function() {
+                                //Now add tags to the items themselves
+                                gApp._nodeTree.each( function(node) {
+                                    debugger;
+                                    var sourceTagStore = node.data.sourceRecord.getCollection('Tags');
+                                    sourceTagStore.load({
+                                        callback: function() {
+                                            targetTagStore = node.data.targetRecord.getCollection('Tags');
+                                            targetTagStore.load({
+                                                callback: function() {
+                                                    _.each(sourceTagStore.getRecords(), function(sourceTagRecord) {
+                                                        targetTagStore.add({Name: sourceTagRecord.get('Name')});
+                                                    });
+                                                    targetTagStore.sync();
+                                                }
+                                            });
+                                        }
+                                    });
+                                });
+                                //resolve even though the saving is ongoing....
+                                deferred.resolve('copyTags');
+                            }
+                        }).always ( function() {
+                            gApp.setLoading(false);
+                        });            
                     }
-                };
-                var getReq = new XMLHttpRequest();
-                var url = gApp.getContext().getSubscription()._ref;
-                url = url.substring(0,url.indexOf('subscription')) +
-                    'tag/create';
-                getReq.onreadystatechange = gApp._tagSuccessHandler;
-                getReq.withCredentials = true;
-                currentState = 'Reading';
-                getReq.open("POST", url + '?compact=true&includePermissions=true&project=' + encodeURIComponent(gApp._getTargetProject()._ref));
-                getReq.send(JSON.stringify(msg));
-        
+                }
             });
         }
-
-        gApp.setLoading(false);
-        deferred.resolve(); //Dummy 
-        
         return deferred.promise;
-    },
-
-    _tagSuccessHandler: function(event) {
-        if ((this.readyState === 4) && (this.status === 200)){
-            debugger;
-        }
     },
 
     _attachRevisionHistory: function(){
         var deferred = Ext.create('Deft.Deferred');
-        gApp.setLoading('Copying revision histories as attachment');
+        gApp.setLoading('Copying revision histories as attachments');
+
+        gApp._nodeTree.each( function(node) {
+
+        });
 
         gApp.setLoading(false);
-        deferred.resolve(); //Dummy 
+        deferred.resolve('attachRevisionHistory'); //Dummy 
         
         return deferred.promise;
     },
@@ -769,7 +786,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
 
         gApp._saveChildren().then({
             success: function() {
-                deferred.resolve();
+                deferred.resolve('saveChildrenDone');
             }
         });
         return deferred;
@@ -781,12 +798,12 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                 if (gApp._nodesToSave.length) {
                     gApp._saveRecordOnNode(gApp._nodesToSave.shift()).then( {
                         success: function() {
-                            deferred.resolve();
+                            deferred.resolve('saveRecordOnNode');
                         }
                     });
                 }
                 else {
-                    deferred.resolve();
+                    deferred.resolve('noRecordsLeft');
                 }
             }
         });
@@ -798,12 +815,12 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         if (gApp._nodesToSave.length) {
             gApp._saveRecordOnNode(gApp._nodesToSave.shift()).then( {
                 success: function() {
-                    deferred.resolve();
+                    deferred.resolve('savedChildren');
                 }
             });
         }
         else {
-            deferred.resolve();
+            deferred.resolve('saveChildren');
         }
 
 
@@ -924,7 +941,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
             success: function(models) {
                 gApp.targetModels = models;
                 gApp.setLoading(false);
-                deferred.resolve(); //Dummy 
+                deferred.resolve('loadMNodels'); 
             },
             failure: function(e) {
                 console.log('Could not fetch target models: ', e);
@@ -988,7 +1005,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
             ],
             listeners : {
                 load: function() {
-                    deferred.resolve();
+                    deferred.resolve('loadTargetTypes');
                 }
             }
         });
@@ -1017,7 +1034,6 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                     },
                     failure: function(e) {
 //                        Rally.ui.notify.Notifier.showError({message: 'Copy failed'});
-                        console.log(e);
                     }
                 });
             },
@@ -1036,7 +1052,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
 
         var extendedCalls = [
             gApp._copyTags,
-            gApp._attachRevisionHistroy,
+            gApp._attachRevisionHistory,
             gApp._addDependencies    //Within the group we have and warn about external ones!
         ];
 
@@ -1047,7 +1063,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         Deft.Chain.sequence(
             calls, this).then({
             success: function() {
-                deferred.resolve();
+                deferred.resolve('Chain');
             },
             failure: function() {
                 deferred.reject();
@@ -1094,7 +1110,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         if (promises.length > 0) {
             Deft.Promise.all(promises).then({
                 success: function() {
-                    deferred.resolve();
+                    deferred.resolve('allPromises');
                 }
             });
         }
@@ -1105,7 +1121,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                 }
                                                     )
             );
-            deferred.resolve();
+            deferred.resolve('noPromises');
         }
 
         return deferred.promise;
@@ -1140,22 +1156,24 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                 gApp._recurseLevel(records).then ({
                     success: function() {
                         console.log('Completed ' + type + ' recurse for record: ' + record.get('FormattedID'));
-                        promise.resolve();
                     },
                     failure: function() {
                         console.log('Failed to complete recurse for ' + record.get('FormattedID'));
-                        promise.resolve();
                     }
-                });
+                }).always (
+                    function() {
+                        promise.resolve('doneRecurse');
+                    }
+                );
             }
             else {
                 console.log('Nothing to do for type ' + type + ' for ' + record.get('FormattedID'));
-                promise.resolve();
+                promise.resolve('doneRecord');
             }
         }
         else {
             console.log('Failed to load for record: ' + record.get('FormattedID'));
-            promise.resolve();
+            promise.resolve('failedRecord');
         }
     },
 
