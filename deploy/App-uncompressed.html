@@ -705,7 +705,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         //TODO: If we require thousands to be added, we are going to swamp the system with requests and this might need to be 
         //changed so that we (multithread?) control the number.
 
-        if ( gApp._getSourceWorkspace().ObjectID !== gApp._getTargetWorkspace().ObjectID ) {
+        if (( gApp._getSourceWorkspace().ObjectID !== gApp._getTargetWorkspace().ObjectID ) && (tags.length > 0)){
             var tagStore = Ext.create('Rally.data.wsapi.Store', {
                 model: 'Tag',
                 fetch: true,
@@ -718,6 +718,7 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                             };
                             store.add(msg);                    
                         });
+                        //If no tags added, then store.sync does nothing
                         store.sync().then ({
                             success: function() {
                                 //Now add tags to the items themselves
@@ -739,6 +740,10 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                                 });
                                 //resolve even though the saving is ongoing....
                                 deferred.resolve('copyTags');
+                            },
+                            failure: function() {
+                                debugger;
+                                deferred.reject('copyTags');
                             }
                         }).always ( function() {
                             gApp.setLoading(false);
@@ -747,6 +752,10 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                 }
             });
         }
+        else {
+            //We don't need to do anything as the tags are already there.
+            deferred.resolve('copyTags');
+        }
         return deferred.promise;
     },
 
@@ -754,54 +763,67 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         //We should now have the source and target records created, so we can just
         // move the attachments if in the same workspace, or copy if in a different one.
         // For now, we will copy all.
-
         var deferred = Ext.create('Deft.Deferred');
+        var promises = [];
 
-        gApp.setLoading('Copying revision histories as attachments');
+        gApp.setLoading('Copying revision histories as notes');
 
         gApp._nodeTree.each( function(node) {
-                var revHistory = node.data.sourceRecord.get('RevisionHistory');
-                var sourceStore = Ext.create('Rally.data.wsapi.Store', {
-                    model: 'Revision',
-                    filters: [
-                        {
-                            property: 'RevisionHistory',
-                            value: revHistory._ref
-                        }
-                    ],
-                    sorters: [
-                        {
-                            property: 'CreationDate',
-                            direction: 'DESC'
-                        }
-                    ]
-                });
-                sourceStore.load({
-                    callback: function(records, operation, success) {
-                        if (success) {
-                            var revisionText = '';
-                            _.each(records, function(record) {
-                                var shortDate = Ext.Date.format(record.get('CreationDate'),'d-M-Y H:i:s');
-                                revisionText = revisionText + gApp._fixedStringLength(shortDate, 25) + ' ' +
-                                    gApp._fixedStringLength(record.get('User')._refObjectName, 25) + ' ' +
-                                    record.get('Description') +
-                                    '\n';
-                            });
-                            var targetStore = node.data.targetRecord.getCollection('Attachments');
-                            targetStore.load({
-                                callback: function() {
-                                    _.each(sourceStore.getRecords(), function(attachment) {
-debugger;
-                                    });
-                                }
-                            });
-                        }
+            var nodeDeferred = Ext.create('Deft.Deferred');
+            promises.push(nodeDeferred);
+            var revHistory = node.data.sourceRecord.get('RevisionHistory');
+            var sourceStore = Ext.create('Rally.data.wsapi.Store', {
+                model: 'Revision',
+                filters: [
+                    {
+                        property: 'RevisionHistory',
+                        value: revHistory._ref
                     }
-                });
+                ],
+                sorters: [
+                    {
+                        property: 'CreationDate',
+                        direction: 'DESC'
+                    }
+                ]
+            });
+            sourceStore.load({
+                callback: function(records, operation, success) {
+                    if (success) {
+                        var revisionText = '<div>Revision History of Original<p/></div><table style="width:100%"><tr><th>TimeStamp</th><th>By</th><th>Detail</th></tr>';
+                        _.each(records, function(record) {
+                            var shortDate = Ext.Date.format(record.get('CreationDate'),'d-M-Y H:i:s');
+                            revisionText += '<tr><td>' + gApp._fixedStringLength(shortDate, 25) + ' ' +
+                                '</td><td>' + gApp._fixedStringLength(record.get('User')._refObjectName, 25) + ' ' +
+                                '</td><td>' + record.get('Description') +
+                                '</td></tr>';
+                        });
+                        revisionText += '</table>';
+                        var notes = node.data.targetRecord.get('Notes');
+                        node.data.targetRecord.set('Notes', notes + '\n' + revisionText);
+                        node.data.targetRecord.save({
+                            callback: function() {
+                                nodeDeferred.resolve();
+                            }
+                        });
+                    }
+                    else {
+                        nodeDeferred.reject();
+                    }
+                }
+            });
         });
 
-        gApp.setLoading(false);
-        deferred.resolve('attachRevisionHistory'); //Dummy 
+        Deft.Promise.all(promises).then({
+            success: function() {
+                deferred.resolve('attachRevisionHistory');
+            },
+            failure: function() {
+                deferred.reject('attachRevisionHistory');
+            }
+        }). always ( function() {
+                gApp.setLoading(false);
+        });
         
         return deferred.promise;
     },
@@ -891,7 +913,8 @@ debugger;
         var targetModel = gApp.targetModels[modelMapped];
         var fieldConfig = {};
         var data = {};
-        _.each( gApp._copyFieldList(sourceType), function(fieldName) {
+        var copyList = gApp._copyFieldList(sourceType);
+        _.each( copyList, function(fieldName) {
                 data[fieldName] = node.data.sourceRecord.get(fieldName);
         });
         console.log(node.data.Name, data);
@@ -899,8 +922,9 @@ debugger;
         fieldConfig.Project = Rally.util.Ref.getRelativeUri(gApp._getTargetProject());
         fieldConfig.Name = node.data.sourceRecord.get('Name');
 
-        fieldConfig.Notes = '<div>Created from ' + node.data.sourceRecord.get('FormattedID') + 
-                        ' ( ' + gApp._getSourceWorkspace().Name + ' ) </div>' + (fieldConfig.Notes?fieldConfig.Notes:'');
+        fieldConfig.Notes = ((data.Notes !== undefined)?data.Notes:'') +
+                        '<div>Created from ' + node.data.sourceRecord.get('FormattedID') + 
+                        ' (from workspace: ' + gApp._getSourceWorkspace().Name + ' ) </div>' ;
 
         gApp._setParentage(fieldConfig, node);
         node.data.targetRecord = Ext.create(targetModel, Ext.clone(fieldConfig));

@@ -18,9 +18,9 @@ This app can issue many update requests. If you try to copy something too big, y
 
 ## TODO
 
-1. DONE. Add the source FormattedID to the destination item in the notes field or add a discussion entry.
-2. Collate revision history and add as an attachment
-3. DONE. Check model equality between source and destination
+1. DONE. Add the source FormattedID to the destination item in the notes field
+2. DONE. Collate revision history and add as Notes
+3. DONE. Check model equality between source and destination - will notify user of problems now.
 3. Find all dependencies are re-create them
 4. Find all Milestones and re-create them
 5. DONE. Copy all tags over
