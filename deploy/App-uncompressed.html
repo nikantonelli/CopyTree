@@ -933,24 +933,24 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                 node.data.targetRecord = savedRecord;
                 gApp._updateHierarchyStatus(sourceType.toLowerCase(), -1);
                 console.log('Saved ' + node.data.sourceRecord.get('FormattedID') + ' to ' + node.data.targetRecord.get('FormattedID'));
-                //Reload the parent for concurrency resolution
-                if ( node.parent !== null) { 
-                    node.parent.data.targetRecord.self.load(  node.parent.data.targetRecord.get('ObjectID'), {
-                        fetch: true,
-                        callback: function(record, operation) {
-                            if (operation.wasSuccessful()) {
-                                node.parent.data.targetRecord = record;
+                // //Reload the parent for updated fields
+                // if ( node.parent !== null) { 
+                //     node.parent.data.targetRecord.self.load(  node.parent.data.targetRecord.get('ObjectID'), {
+                //         fetch: true,
+                //         callback: function(record, operation) {
+                //             if (operation.wasSuccessful()) {
+                //                 node.parent.data.targetRecord = record;
                                 deferred.resolve(savedRecord);
-                            }
-                            else {
-                                deferred.reject();    
-                            }
-                        }
-                    });
-                } else {
-                    node.data.targetRecord = savedRecord;
-                    deferred.resolve(savedRecord);
-                }
+                //             }
+                //             else {
+                //                 deferred.reject();    
+                //             }
+                //         }
+                //     });
+                // } else {
+                //     node.data.targetRecord = savedRecord;
+                //     deferred.resolve(savedRecord);
+                // }
             },
             failure: function(e) {
                 var msg = 'Failed to save copy of ' ;
