@@ -713,7 +713,6 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
                             success: function() {
                                 //Now add tags to the items themselves
                                 gApp._nodeTree.each( function(node) {
-                                    debugger;
                                     var sourceTagStore = node.data.sourceRecord.getCollection('Tags');
                                     sourceTagStore.load({
                                         callback: function() {
@@ -743,17 +742,65 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
     },
 
     _attachRevisionHistory: function(){
+        //We should now have the source and target records created, so we can just
+        // move the attachments if in the same workspace, or copy if in a different one.
+        // For now, we will copy all.
+
         var deferred = Ext.create('Deft.Deferred');
+
         gApp.setLoading('Copying revision histories as attachments');
 
         gApp._nodeTree.each( function(node) {
-
+                var revHistory = node.data.sourceRecord.get('RevisionHistory');
+                var sourceStore = Ext.create('Rally.data.wsapi.Store', {
+                    model: 'Revision',
+                    filters: [
+                        {
+                            property: 'RevisionHistory',
+                            value: revHistory._ref
+                        }
+                    ],
+                    sorters: [
+                        {
+                            property: 'CreationDate',
+                            direction: 'DESC'
+                        }
+                    ]
+                });
+                sourceStore.load({
+                    callback: function(records, operation, success) {
+                        if (success) {
+                            var revisionText = '';
+                            _.each(records, function(record) {
+                                var shortDate = Ext.Date.format(record.get('CreationDate'),'d-M-Y H:i:s');
+                                revisionText = revisionText + gApp._fixedStringLength(shortDate, 25) + ' ' +
+                                    gApp._fixedStringLength(record.get('User')._refObjectName, 25) + ' ' +
+                                    record.get('Description') +
+                                    '\n';
+                            });
+                            var targetStore = node.data.targetRecord.getCollection('Attachments');
+                            targetStore.load({
+                                callback: function() {
+                                    _.each(sourceStore.getRecords(), function(attachment) {
+debugger;
+                                    });
+                                }
+                            });
+                        }
+                    }
+                });
         });
 
         gApp.setLoading(false);
         deferred.resolve('attachRevisionHistory'); //Dummy 
         
         return deferred.promise;
+    },
+
+    _fixedStringLength: function(inStr, length) {
+        var spaces = ' '.repeat(length);
+        var outStr = inStr.substring(0, length);
+        return outStr + spaces.substring(0, length - outStr.length);
     },
 
     _createTargetCopy: function(){
@@ -765,15 +812,6 @@ Ext.define('Rally.apps.PortfolioItemCopy.app', {
         gApp._nodeTree.eachBefore( function(node) {
             gApp._nodesToSave.push(node);
         });
-        // gApp._saveRecord(gApp._nodeTree).then({
-        //     success: function() {
-        //         gApp._saveChildren(gApp._nodeTree).then( {
-        //             success: function() {
-        //                 deferred.resolve();
-        //             }
-        //         });
-        //     }
-        // });
 
         gApp._saveChildren().then({
             success: function() {

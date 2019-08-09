@@ -8,6 +8,12 @@ might be in the same or different workspace.
 
 Portofolio item names might differ so the app tries to use the ordinal level of the item instead.
 
+## BE WARNED!
+
+This app relies on your local memory. If you try to copy something too big, it will fail.
+This app is single threaded and can be slow. If you try to copy something too big, you will be bored to death.
+This app can issue many update requests. If you try to copy something too big, you will run out of network resources.
+
 ## TODO
 
 1. Add the source FormattedID to the destination item in the notes field or add a discussion entry.
