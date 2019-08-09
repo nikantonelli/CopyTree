@@ -26,3 +26,4 @@ This app can issue many update requests. If you try to copy something too big, y
 5. DONE. Copy all tags over
 6. Copy over timeboxes
 7. Add custom field mapping
+8. Modify to use threading for speed
