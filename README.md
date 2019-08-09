@@ -27,3 +27,4 @@ This app can issue many update requests. If you try to copy something too big, y
 6. Copy over timeboxes
 7. Add custom field mapping
 8. Modify to use threading for speed
+9. Modify to use batch endpoint for speed of child creation
